@@ -1,0 +1,8 @@
+=================
+datajoint-datapub
+=================
+
+This is 'datajoint-datapub', a library for interfacing with DataJoint Neuro's
+data publication service.
+
+Status: WIP
