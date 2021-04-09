@@ -26,5 +26,5 @@ setup(
     keywords='DataJoint MySQL',
     install_requires=requirements,
     packages=find_packages(exclude=['doc', 'test']),
-    scripts=['scripts/djarchive.py']
+    scripts=['scripts/djarchive']
 )
