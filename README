@@ -12,7 +12,9 @@ Status: WIP; currently for internal/prototyping use.
 Install
 =======
 
-  1) Install the package
+  1) Install the package:
+
+.. code-block:: sh
 
      $ pip install .
 
@@ -38,6 +40,8 @@ Usage via 'djarchive' utility script
 The 'djarchive' utility script can be used for CLI interactions with the
 data archive. Usage synopsys is as follows:
 
+.. code-block:: sh
+
   $ djarchive datasets
   some-set
   $ djarchive revisions
@@ -53,6 +57,8 @@ Usage via 'djarchive_client' python pacakge
 The djarchive_client python package contains the logic for interacting
 with the archive. Best reference is the code/docstrings; minimal usage
 example is as follows:
+
+.. code-block:: python
 
   >>> from djarchive_client import client
   >>> c = client()
