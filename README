@@ -14,10 +14,7 @@ Install
 
   1) Install the package:
 
-.. code-block:: sh
-
-     $ pip install .
-
+     ``$ pip install .``
 
   2) Configure datajoint with appropriate dj.config['custom'] values:
   
