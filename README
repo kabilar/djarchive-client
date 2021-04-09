@@ -1,8 +1,8 @@
-=================
-datajoint-datapub
-=================
+================
+djarchive-client
+================
 
-This is 'datajoint-datapub', a library for interfacing with DataJoint Neuro's
+This is 'djarchive-client', a library for interfacing with DataJoint Neuro's
 data publication service.
 
 Status: WIP
