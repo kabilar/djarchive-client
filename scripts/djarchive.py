@@ -10,7 +10,7 @@ from collections import ChainMap
 
 import datajoint as dj
 
-from djpublib import client
+from djarchive_client import client
 
 
 log = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ def logsetup(*args):
 
     log.setLevel(level)
 
-    logging.getLogger('djpublib').setLevel(level)
+    logging.getLogger('djarchive_client').setLevel(level)
 
 
 def datasets(*args):
@@ -74,17 +74,15 @@ def revisions(*args):
         print('{},{}'.format(*d))
 
 
-def retrieve(*args):
-    if len(args) < 2:
-        raise TypeError('retrieve dataset revision [target_directory]')
-    if len(args) == 2:
-        args = (*args, os.getcwd())
+def download(*args):
+    if len(args) != 3:
+        raise TypeError('download dataset revision target_directory')
 
-    client().retrieve(*args)
+    client().download(*args, create_target=True)
 
 
 def shell(*args):
-    interact('djpub shell', local=dict(ChainMap(locals(), globals())))
+    interact('djarchive shell', local=dict(ChainMap(locals(), globals())))
 
 
 actions = {
@@ -101,14 +99,14 @@ actions = {
                   list revisions for dataset if given.
                   if dataset is not given, list all datasets+revisions.
                   '''),
-    'retrieve': (retrieve,
+    'download': (download,
                  '''
-                 retrieve dataset revision [target_directory]:
+                 download dataset revision target_directory:
 
                  Retreive dataset into top-level of target_directory.
 
-                 If target_directory is not given, will retrieve to the
-                 current working directory.
+                 If target_directory does not exist, djarchive will attempt
+                 to create it prior to downloading the dataset.
                  '''),
     'shell': (shell,
               '''
@@ -124,7 +122,7 @@ if __name__ == '__main__':
         usage_exit()
 
     logsetup(
-        os.environ.get('DJPUB_LOGLEVEL',
+        os.environ.get('DJARCHIVE_LOGLEVEL',
                        dj.config.get('loglevel', 'INFO')))
 
     action = sys.argv[1]

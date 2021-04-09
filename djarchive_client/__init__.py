@@ -2,8 +2,6 @@
 import os
 import logging
 
-# import ntpath
-# import posixpath
 import posixpath as ufs
 
 from minio import Minio
@@ -13,11 +11,11 @@ from datajoint import config as cfg
 log = logging.getLogger(__name__)
 
 
-class PublicationClient(object):
+class DJArchiveClient(object):
     def __init__(self, **kwargs):
         '''
-        Create a PublicationClient.
-        Client code should use the 'client' method.
+        Create a DJArchiveClient.
+        Normal client code should use the 'client' method.
         '''
 
         self.bucket = kwargs['bucket']
@@ -31,30 +29,30 @@ class PublicationClient(object):
     @classmethod
     def client(cls, admin=False):
         '''
-        Create a PublicationClient.
+        Create a DJArchiveClient.
 
         Currently:
 
             Non-admin usage expects dj.config['custom'] values for:
 
-              - djpub.client.bucket
-              - djpub.client.endpoint
-              - djpub.client.access_key
-              - djpub.client.secret_key
+              - djarchive.client.bucket
+              - djarchive.client.endpoint
+              - djarchive.client.access_key
+              - djarchive.client.secret_key
 
             Admin usage expects dj.config['custom'] values for:
 
-              - djpub.admin.bucket
-              - djpub.admin.endpoint
-              - djpub.admin.access_key
-              - djpub.admin.secret_key
+              - djarchive.admin.bucket
+              - djarchive.admin.endpoint
+              - djarchive.admin.access_key
+              - djarchive.admin.secret_key
 
         The configuration mechanism is expected to change to allow for
         more general purpose client usage without requiring extra
         configuration.
         '''
 
-        cfg_key = 'djpub.admin' if admin else 'djpub.client'
+        cfg_key = 'djarchive.admin' if admin else 'djarchive.client'
 
         try:
 
@@ -64,22 +62,27 @@ class PublicationClient(object):
 
         except KeyError:
 
-            msg = 'invalid PublicationClient configuration'
+            msg = 'invalid DJArchiveClient configuration'
             log.warning(msg)
             raise
 
         return cls(**create_args)
 
-    def publish(name, revision, source_directory):
+    def upload(name, revision, source_directory):
         '''
-        publish contents of source_directory as the dataset of name/revision
+        upload contents of source_directory as the dataset of name/revision
+
+        (currently placeholder for API design)
         '''
-        raise NotImplementedError('publication not implemented')
+        raise NotImplementedError('upload not implemented')
 
     def redact(name, revision):
         '''
         redact (revoke) dataset publication of name/revision
-        XXX: safety?
+
+        (currently placeholder for API design)
+
+        XXX: workflow data safety concerns?
         '''
         raise NotImplementedError('redaction not implemented')
 
@@ -87,6 +90,9 @@ class PublicationClient(object):
         '''
         return the available datasets as a generator of dataset names
         '''
+
+        # s3://bucket/dataset -> generator(('dataset'))
+
         for ds in (o for o in self.client.list_objects(self.bucket)
                    if o.is_dir):
             yield ds.object_name.rstrip('/')
@@ -97,9 +103,12 @@ class PublicationClient(object):
         of (dataset_name, dataset_revision) tuples.
         '''
         def _revisions(dataset):
-            # s3://bucket/set/revision -> generator(('set', 'revision'), ...)
+
+            # s3://bucket/dataset/revision ->
+            #    generator(('dataset', 'revision'), ...)
 
             pfx = '{}/'.format(dataset)
+
             for ds in (o for o in self.client.list_objects(
                     self.bucket, prefix=pfx) if o.is_dir):
 
@@ -110,16 +119,16 @@ class PublicationClient(object):
         for ds in datasets:
             yield from _revisions(ds)
 
-    def retrieve(self, name, revision, target_directory, create_target=False):
+    def download(self, dataset_name, revision, target_directory,
+                 create_target=False):
+
         '''
-        retrieve a dataset's contents into the top-level of target_directory.
+        download a dataset's contents into the top-level of target_directory.
 
         when create_target is specified, target_directory and parents
         will be created, otherwise, an error is signaled.
-
-        XXX: does top-level make sense, or create dataset|dataset/rev subdir?
         '''
-        # XXX: not sure about exist_ok here ...
+
         os.makedirs(target_directory, exist_ok=True) if create_target else None
 
         if not os.path.exists(target_directory):
@@ -129,16 +138,22 @@ class PublicationClient(object):
 
             raise FileNotFoundError(msg)
 
-        pfx = ufs.join(name, revision)
+        pfx = ufs.join(dataset_name, revision)
+
+        # main download loop -
+        #
+        # iterate over objects,
+        # convert full source path to source subpath,
+        # construct local path and create local subdirectory in the target
+        # then fetch the object into the local path.
+        #
+        # local paths are dealt with using OS path for native support,
+        # paths in the s3 space use posixpath since these are '/' delimited
 
         for obj in self.client.list_objects(
                 self.bucket, recursive=True, prefix=pfx):
 
-            assert not obj.is_dir  # 'directories' not in recursive list ...
-
-            # convert source path to source subpath and construct local path.
-            # local paths are dealt with using OS path for native support,
-            # s3-space paths use posixpath since these are '/' delimited
+            assert not obj.is_dir  # assuming dir not in recursive=True list
 
             spath = obj.object_name  # ds/rev/<...?>/thing
 
@@ -160,5 +175,4 @@ class PublicationClient(object):
             self.client.fget_object(self.bucket, spath, lpath)
 
 
-# export factory method as function
-client = PublicationClient.client
+client = DJArchiveClient.client  # export factory method as utility function
