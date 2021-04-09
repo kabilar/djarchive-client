@@ -1,3 +1,4 @@
+
 ================
 djarchive-client
 ================
@@ -5,4 +6,82 @@ djarchive-client
 This is 'djarchive-client', a library for interfacing with DataJoint Neuro's
 data publication service.
 
-Status: WIP
+Status: WIP; currently for internal/prototyping use.
+
+Install
+=======
+
+  1) Install the package
+
+     $ pip install .
+
+  2) Configure datajoint with appropriate dj.config['custom'] values:
+  
+     Non-admin usage expects dj.config['custom'] values for:
+ 
+       - djarchive.client.bucket
+       - djarchive.client.endpoint
+       - djarchive.client.access_key
+       - djarchive.client.secret_key
+ 
+     Admin usage expects dj.config['custom'] values for:
+ 
+       - djarchive.admin.bucket
+       - djarchive.admin.endpoint
+       - djarchive.admin.access_key
+       - djarchive.admin.secret_key
+
+Usage via 'djarchive' utility script
+====================================
+
+The 'djarchive' utility script can be used for CLI interactions with the
+data archive. Usage synopsys is as follows:
+
+  $ djarchive datasets
+  some-set
+  $ djarchive revisions
+  some-set,000
+  other-set,001
+  $ djarchive revisions some-set
+  some-set,000
+  $ djarchive download some-set 000 ./some-set-000
+
+Usage via 'djarchive_client' python pacakge
+===========================================
+
+The djarchive_client python package contains the logic for interacting
+with the archive. Best reference is the code/docstrings; minimal usage
+example is as follows:
+
+  >>> from djarchive_client import client
+  >>> c = client()
+  >>> c.datasets()
+  <generator object DJArchiveClient.datasets at 0x7faf65ec4ba0>
+  >>> list(c.datasets())
+  ['some-set']
+  >>> c.revisions()
+  <generator object DJArchiveClient.revisions at 0x7faf65ec4ba0>
+  >>> list(c.revisions())
+  [('some-set', '000'), ('other-set', '001')]
+  >>> list(c.revisions('some-set'))
+  [('some-set', '000')]
+  >>> c.download('some-set', '000', './some-set-000', create_target=True)
+
+Logging & Output
+================
+
+Functions in the djarchive_client library and the djarchive utility
+currently do not produce output in the normal case.  In some cases,
+such as for viewing per-file download status messages, more detailed
+output may be desired.
+
+In the script case, setting dj.config['loglevel'] or the environment
+variable DJARCHIVE_LOGLEVEl to 'DEBUG' will increase logging
+output. Additionally, output can be logged to a file by setting
+dj.config['custom']['loglevel'] to a string containing the path to a
+desired logfile.
+
+For library usage, setting the python logging for the 'djarchive_client'
+module to logging.DEBUG will enable more verbose output. See the function
+'logsetup' in scripts/djarchive for more details.
+
