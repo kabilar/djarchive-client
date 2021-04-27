@@ -33,38 +33,33 @@ class DJArchiveClient(object):
 
         Currently:
 
-            Non-admin usage expects dj.config['custom'] values for:
-
-              - djarchive.client.bucket
-              - djarchive.client.endpoint
-              - djarchive.client.access_key
-              - djarchive.client.secret_key
-
             Admin usage expects dj.config['custom'] values for:
 
-              - djarchive.admin.bucket
-              - djarchive.admin.endpoint
-              - djarchive.admin.access_key
-              - djarchive.admin.secret_key
+              - djarchive.access_key
+              - djarchive.secret_key
+
+            Client and admin usage allow overriding dj.config['custom'] 
+            defaults for:
+
+              - djarchive.bucket
+              - djarchive.endpoint
 
         The configuration mechanism is expected to change to allow for
         more general purpose client usage without requiring extra
         configuration.
         '''
 
-        cfg_key = 'djarchive.admin' if admin else 'djarchive.client'
+        dj_custom = cfg.get('custom', {})
 
-        try:
+        cfg_defaults = {
+            'djarchive.bucket': 'djhub.vathes.datapub.elements',
+            'djarchive.endpoint': 's3.djhub.io'
+        }
 
-            create_args = {k: cfg['custom']['{}.{}'.format(cfg_key, k)]
-                           for k in ('endpoint', 'access_key', 'secret_key',
-                                     'bucket')}
-
-        except KeyError:
-
-            msg = 'invalid DJArchiveClient configuration'
-            log.warning(msg)
-            raise
+        create_args = {k: {**cfg_defaults, **dj_custom}.get(
+            'djarchive.{}'.format(k), None)
+                       for k in ('endpoint', 'access_key', 'secret_key',
+                                 'bucket')}
 
         return cls(**create_args)
 
