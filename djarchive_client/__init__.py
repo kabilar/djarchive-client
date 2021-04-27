@@ -6,6 +6,7 @@ import posixpath as ufs
 
 from minio import Minio
 from datajoint import config as cfg
+from tqdm import tqdm
 
 
 log = logging.getLogger(__name__)
@@ -109,13 +110,22 @@ class DJArchiveClient(object):
 
                 yield tuple(ds.object_name.rstrip('/').split(ufs.sep))
 
+        nfound = -1
+
         datasets = (dataset,) if dataset else self.datasets()
 
         for ds in datasets:
+            nfound += 1
             yield from _revisions(ds)
 
+        if dataset and not nfound:
+
+            msg = 'dataset {} not found'.format(dataset)
+            log.debug(msg)
+            raise FileNotFoundError(msg)
+
     def download(self, dataset_name, revision, target_directory,
-                 create_target=False):
+                 create_target=False, display_progress=False):
 
         '''
         download a dataset's contents into the top-level of target_directory.
@@ -127,10 +137,9 @@ class DJArchiveClient(object):
         os.makedirs(target_directory, exist_ok=True) if create_target else None
 
         if not os.path.exists(target_directory):
+
             msg = 'target_directory {} does not exist'.format(target_directory)
-
             log.warning(msg)
-
             raise FileNotFoundError(msg)
 
         pfx = ufs.join(dataset_name, revision)
@@ -145,8 +154,14 @@ class DJArchiveClient(object):
         # local paths are dealt with using OS path for native support,
         # paths in the s3 space use posixpath since these are '/' delimited
 
-        for obj in self.client.list_objects(
-                self.bucket, recursive=True, prefix=pfx):
+        obj_iter = self.client.list_objects(
+            self.bucket, recursive=True, prefix=pfx)
+
+        obj_iter = tqdm(obj_iter) if display_progress else obj_iter
+
+        nfound = 0
+
+        for obj in obj_iter:
 
             assert not obj.is_dir  # assuming dir not in recursive=True list
 
@@ -168,6 +183,14 @@ class DJArchiveClient(object):
             os.makedirs(lsubd, exist_ok=True)
 
             self.client.fget_object(self.bucket, spath, lpath)
+
+            nfound += 1
+
+        if not nfound:
+
+            msg = 'dataset {} not found'.format(dataset_name)
+            log.debug(msg)
+            raise FileNotFoundError(msg)
 
 
 client = DJArchiveClient.client  # export factory method as utility function
