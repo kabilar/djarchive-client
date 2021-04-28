@@ -176,7 +176,7 @@ class DJArchiveClient(object):
             assert (os.path.commonprefix((target_directory, lpath))
                     == target_directory)
 
-            xfer_msg = 'transferring {} -> {}'.format(spath, lpath)
+            xfer_msg = 'transferring {} to {}'.format(spath, lpath)
 
             log.debug(xfer_msg)
 
