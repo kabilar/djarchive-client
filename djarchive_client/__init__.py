@@ -154,12 +154,10 @@ class DJArchiveClient(object):
         # local paths are dealt with using OS path for native support,
         # paths in the s3 space use posixpath since these are '/' delimited
 
+        nfound = 0
+
         obj_iter = self.client.list_objects(
             self.bucket, recursive=True, prefix=pfx)
-
-        obj_iter = tqdm(obj_iter) if display_progress else obj_iter
-
-        nfound = 0
 
         for obj in obj_iter:
 
@@ -178,7 +176,12 @@ class DJArchiveClient(object):
             assert (os.path.commonprefix((target_directory, lpath))
                     == target_directory)
 
-            log.debug('transferring {} -> {}'.format(spath, lpath))
+            xfer_msg = 'transferring {} -> {}'.format(spath, lpath)
+
+            log.debug(xfer_msg)
+
+            if display_progress:
+                print(xfer_msg)
 
             os.makedirs(lsubd, exist_ok=True)
 
@@ -188,8 +191,11 @@ class DJArchiveClient(object):
 
         if not nfound:
 
-            msg = 'dataset {} not found'.format(dataset_name)
+            msg = 'dataset {} revision {} not found'.format(
+                dataset_name, revision)
+
             log.debug(msg)
+
             raise FileNotFoundError(msg)
 
 
