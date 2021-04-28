@@ -86,7 +86,8 @@ def download(*args):
     try:
         client().download(*args, create_target=True, display_progress=True)
     except FileNotFoundError:
-        print('dataset {} not found.'.format(*args), file=sys.stderr)        
+        print('dataset {} revision {} not found.'.format(*args[:2]),
+              file=sys.stderr)
 
 
 def shell(*args):
