@@ -65,11 +65,13 @@ def logsetup(*args):
 
 
 def datasets(*args):
+    print('dataset_name')
     for d in client().datasets():
         print('{}'.format(d))
 
 
 def revisions(*args):
+    print('dataset_name,revision')
     try:
         for d in client().revisions(*args):
             print('{},{}'.format(*d))
