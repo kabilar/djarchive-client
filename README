@@ -18,21 +18,19 @@ Installation & Setup instructions are as follows:
 
      ``$ pip install .``
 
-  2) Configure datajoint with appropriate dj.config['custom'] values:
-  
-     Non-admin usage expects dj.config['custom'] values for:
- 
-       - djarchive.client.bucket
-       - djarchive.client.endpoint
-       - djarchive.client.access_key
-       - djarchive.client.secret_key
- 
-     Admin usage expects dj.config['custom'] values for:
- 
-       - djarchive.admin.bucket
-       - djarchive.admin.endpoint
-       - djarchive.admin.access_key
-       - djarchive.admin.secret_key
+  2) If applicable, configure datajoint with appropriate dj.config['custom'] 
+     values:
+
+      Admin usage expects dj.config['custom'] values for:
+
+        - djarchive.access_key
+        - djarchive.secret_key
+
+      Client and admin usage allow overriding dj.config['custom']
+      defaults for:
+
+        - djarchive.bucket
+        - djarchive.endpoint
 
 Usage via 'djarchive' utility script
 ====================================

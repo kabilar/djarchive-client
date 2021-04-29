@@ -6,6 +6,7 @@ import posixpath as ufs
 
 from minio import Minio
 from datajoint import config as cfg
+from tqdm import tqdm
 
 
 log = logging.getLogger(__name__)
@@ -33,38 +34,33 @@ class DJArchiveClient(object):
 
         Currently:
 
-            Non-admin usage expects dj.config['custom'] values for:
-
-              - djarchive.client.bucket
-              - djarchive.client.endpoint
-              - djarchive.client.access_key
-              - djarchive.client.secret_key
-
             Admin usage expects dj.config['custom'] values for:
 
-              - djarchive.admin.bucket
-              - djarchive.admin.endpoint
-              - djarchive.admin.access_key
-              - djarchive.admin.secret_key
+              - djarchive.access_key
+              - djarchive.secret_key
+
+            Client and admin usage allow overriding dj.config['custom'] 
+            defaults for:
+
+              - djarchive.bucket
+              - djarchive.endpoint
 
         The configuration mechanism is expected to change to allow for
         more general purpose client usage without requiring extra
         configuration.
         '''
 
-        cfg_key = 'djarchive.admin' if admin else 'djarchive.client'
+        dj_custom = cfg.get('custom', {})
 
-        try:
+        cfg_defaults = {
+            'djarchive.bucket': 'djhub.vathes.datapub.elements',
+            'djarchive.endpoint': 's3.djhub.io'
+        }
 
-            create_args = {k: cfg['custom']['{}.{}'.format(cfg_key, k)]
-                           for k in ('endpoint', 'access_key', 'secret_key',
-                                     'bucket')}
-
-        except KeyError:
-
-            msg = 'invalid DJArchiveClient configuration'
-            log.warning(msg)
-            raise
+        create_args = {k: {**cfg_defaults, **dj_custom}.get(
+            'djarchive.{}'.format(k), None)
+                       for k in ('endpoint', 'access_key', 'secret_key',
+                                 'bucket')}
 
         return cls(**create_args)
 
@@ -114,13 +110,22 @@ class DJArchiveClient(object):
 
                 yield tuple(ds.object_name.rstrip('/').split(ufs.sep))
 
+        nfound = -1
+
         datasets = (dataset,) if dataset else self.datasets()
 
         for ds in datasets:
+            nfound += 1
             yield from _revisions(ds)
 
+        if dataset and not nfound:
+
+            msg = 'dataset {} not found'.format(dataset)
+            log.debug(msg)
+            raise FileNotFoundError(msg)
+
     def download(self, dataset_name, revision, target_directory,
-                 create_target=False):
+                 create_target=False, display_progress=False):
 
         '''
         download a dataset's contents into the top-level of target_directory.
@@ -132,10 +137,9 @@ class DJArchiveClient(object):
         os.makedirs(target_directory, exist_ok=True) if create_target else None
 
         if not os.path.exists(target_directory):
+
             msg = 'target_directory {} does not exist'.format(target_directory)
-
             log.warning(msg)
-
             raise FileNotFoundError(msg)
 
         pfx = ufs.join(dataset_name, revision)
@@ -150,8 +154,12 @@ class DJArchiveClient(object):
         # local paths are dealt with using OS path for native support,
         # paths in the s3 space use posixpath since these are '/' delimited
 
-        for obj in self.client.list_objects(
-                self.bucket, recursive=True, prefix=pfx):
+        nfound = 0
+
+        obj_iter = self.client.list_objects(
+            self.bucket, recursive=True, prefix=pfx)
+
+        for obj in obj_iter:
 
             assert not obj.is_dir  # assuming dir not in recursive=True list
 
@@ -168,11 +176,27 @@ class DJArchiveClient(object):
             assert (os.path.commonprefix((target_directory, lpath))
                     == target_directory)
 
-            log.debug('transferring {} -> {}'.format(spath, lpath))
+            xfer_msg = 'transferring {} to {}'.format(spath, lpath)
+
+            log.debug(xfer_msg)
+
+            if display_progress:
+                print(xfer_msg)
 
             os.makedirs(lsubd, exist_ok=True)
 
             self.client.fget_object(self.bucket, spath, lpath)
+
+            nfound += 1
+
+        if not nfound:
+
+            msg = 'dataset {} revision {} not found'.format(
+                dataset_name, revision)
+
+            log.debug(msg)
+
+            raise FileNotFoundError(msg)
 
 
 client = DJArchiveClient.client  # export factory method as utility function
