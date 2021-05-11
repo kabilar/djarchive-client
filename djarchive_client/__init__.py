@@ -4,6 +4,9 @@ import logging
 
 import posixpath as ufs
 
+from itertools import chain
+from itertools import repeat
+
 from minio import Minio
 from datajoint import config as cfg
 from tqdm import tqdm
@@ -39,7 +42,7 @@ class DJArchiveClient(object):
               - djarchive.access_key
               - djarchive.secret_key
 
-            Client and admin usage allow overriding dj.config['custom'] 
+            Client and admin usage allow overriding dj.config['custom']
             defaults for:
 
               - djarchive.bucket
@@ -186,7 +189,7 @@ class DJArchiveClient(object):
 
             os.makedirs(lsubd, exist_ok=True)
 
-            self.client.fget_object(self.bucket, spath, lpath)
+            self.fget_object(spath, lpath, display_progress=display_progress)
 
             nfound += 1
 
@@ -198,6 +201,29 @@ class DJArchiveClient(object):
             log.debug(msg)
 
             raise FileNotFoundError(msg)
+
+    def fget_object(self, spath, lpath, display_progress=False):
+
+        statb = self.client.stat_object(self.bucket, spath)
+
+        chunksz = 1024 ** 2  # 1 MiB (TODO? configurable)
+
+        nchunks, leftover = statb.size // chunksz, statb.size % chunksz
+
+        chunker = (chain(repeat(chunksz, nchunks), (leftover,)) if leftover
+                   else repeat(chunksz, nchunks))
+
+        chunker = tqdm(chunker, unit='MiB', ncols=60,
+                       disable=not display_progress,
+                       total=nchunks + 1 if leftover else nchunks)
+
+        offset = 0
+        with open(lpath, 'wb') as fh:
+            for chunk in chunker:
+                dat = self.client.get_object(
+                    self.bucket, spath, offset=offset, length=chunk)
+                fh.write(dat.data)
+                offset += chunk
 
 
 client = DJArchiveClient.client  # export factory method as utility function
