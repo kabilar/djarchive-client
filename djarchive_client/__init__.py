@@ -7,6 +7,8 @@ import posixpath as ufs
 from itertools import chain
 from itertools import repeat
 
+from hashlib import sha256 as sha
+
 from minio import Minio
 from datajoint import config as cfg
 from tqdm import tqdm
@@ -16,6 +18,9 @@ log = logging.getLogger(__name__)
 
 
 class DJArchiveClient(object):
+
+    MANIFEST_FNAME = 'djarchive-manifest.csv'
+    
     def __init__(self, **kwargs):
         '''
         Create a DJArchiveClient.
@@ -65,15 +70,171 @@ class DJArchiveClient(object):
                        for k in ('endpoint', 'access_key', 'secret_key',
                                  'bucket')}
 
+        print('ca', create_args)
+
+        if admin and not all(('access_key' in create_args,
+                              'secret_key' in create_args)):
+
+            raise AttributeError('admin operation requested w/o credentials.')
+
         return cls(**create_args)
 
-    def upload(name, revision, source_directory):
+    def _manifest(self, filepath):
+        '''
+        Compute the manifest data for the file at filepath.
+
+        Function returns size in bytes and the sha256 hex digest of the file.
+
+        Does not perform path normalization to/from posix path as used within
+        the manifest file.
+        '''
+
+        fp_sz = os.stat(filepath).st_size
+        
+        fp_sha = sha()
+
+        rd_sz = 1024 * 64
+
+        with open(filepath, 'rb') as fh:
+            dat = fh.read(rd_sz)
+            while dat:
+                fp_sha.update(dat)
+                dat = fh.read(rd_sz)
+
+        return fp_sz, fp_sha.hexdigest()
+
+    def _normalize_path(self, root_directory, filepath):
+
+        subp = filepath.replace(
+            os.path.commonprefix(
+                (root_directory, filepath)), '').lstrip(os.path.sep)
+
+        return subp.replace(os.path.sep, ufs.sep)
+
+    def _denormalize_path(self, root_directory, subpath):
+
+        subpath = subp.replace(ufs.sep, os.path.sep)
+
+        return os.path.join(root_directory, subpath)
+
+    def write_manifest(self, source_directory, overwrite=False):
+        '''
+        create a manifest for source_directory.
+
+        manifest is of the form:
+        
+          size(bytes),hex(sha256),posixpath(subpath)
+          ...
+
+        '''
+
+        mani = os.path.join(source_directory, self.MANIFEST_FNAME)
+
+        if os.path.exists(mani) and not overwrite:
+            msg = 'djarchive manifest {} already exists and overwrite=False'
+            log.warning(msg)
+            raise FileExistsError(msg)
+
+        with open(mani, 'wb') as mani_fh:
+
+            for root, dirs, files in os.walk(source_directory):
+
+                for fp in (os.path.join(root, f) for f in files):
+
+                    if fp == mani:
+                        continue
+                    
+                    subp = self._normalize_path(source_directory, fp)
+
+                    print("adding {}".format(subp))
+
+                    fp_sz, fp_sha = self._manifest(fp)
+
+                    ent = '"{}","{}","{}"\n'.format(fp_sz, fp_sha, subp)
+
+                    mani_fh.write(ent.encode())
+
+    def read_manifest(self, source_directory):
+        '''
+        Read the manifest contents for the dataset within source_directory,
+        if available.
+
+        Returns a file-subpath keyed dictionary with each item
+        containing a dictionary of the given files size & sha.
+
+        for example:
+
+          {'/etc/passwd': {'size': 512, 'sha': 'deadbeef...'}}
+
+        If no manifest exists, a FileNotFoundError is raised.
+        '''
+
+        mani = os.path.join(source_directory, self.MANIFEST_FNAME)
+
+        ret = {}
+
+        with open(mani, 'rb') as mani_fh:
+            for ent in mani_fh:
+                ent = ent.decode().strip().split(',')
+                sz, sha, subp = (i.replace('"', '') for i in ent)
+
+                assert subp not in ret  # detect invalid duplicates
+
+                ret[subp] = {'size': int(sz), 'sha': sha}
+
+        return ret
+
+    def upload(self, name, revision, source_directory):
         '''
         upload contents of source_directory as the dataset of name/revision
 
         (currently placeholder for API design)
         '''
-        raise NotImplementedError('upload not implemented')
+
+        # todo: make more intuitive api?
+        mani_fp = os.path.join(source_directory, self.MANIFEST_FNAME)
+
+        try:
+            mani_dat = self.read_manifest(source_directory)
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                "Manifest not found for {}. Run 'manifest' first?".format(
+                    source_directory)) from None
+
+        for root, dirs, files in os.walk(source_directory):
+
+            for fp in (os.path.join(root, f) for f in files):
+
+                if fp == mani_fp:
+                    log.warning('fixme: upload mani')
+                    continue
+
+                subp = self._normalize_path(source_directory, fp)
+
+                if subp not in mani_dat:
+                    msg = 'subpath {} not in manifest'.format(subp)
+                    log.error(msg)
+                    raise FileNotFoundError(msg)
+
+                fp_sz, fp_sha = self._manifest(fp)
+
+                ref_sz, ref_sha = mani_dat[subp]['size'], mani_dat[subp]['sha']
+
+                if not all((fp_sz == ref_sz, fp_sha == ref_sha)):
+
+                    msg = 'manifest mismatch for {}'.format(subp)
+                    msg += ' (sz: {} / ref: {})'.format(fp_sz, ref_sz)
+                    msg += ' (sha: {} / ref: {})'.format(fp_sha, ref_sha)
+
+                    log.error(msg)
+
+                    raise ValueError(msg)
+
+                dstp = ufs.join(name, revision, subp)
+
+                self.fput_object(fp, dstp)
+
+        self.fput_object(mani_fp, ufs.join(name, revision, self.MANIFEST_FNAME))
 
     def redact(name, revision):
         '''
@@ -203,10 +364,15 @@ class DJArchiveClient(object):
             raise FileNotFoundError(msg)
 
     def fget_object(self, spath, lpath, display_progress=False):
+        '''
+        Fetch object in spath into local path lpath.
+
+        If display_progress=True, a download progress meter will be displayed.
+        '''
 
         statb = self.client.stat_object(self.bucket, spath)
 
-        chunksz = 1024 ** 2  # 1 MiB (TODO? configurable)
+        chunksz = 1024 ** 2  # 1 MiB (TODO? configurable/tuning?)
 
         nchunks, leftover = statb.size // chunksz, statb.size % chunksz
 
@@ -224,6 +390,18 @@ class DJArchiveClient(object):
                     self.bucket, spath, offset=offset, length=chunk)
                 fh.write(dat.data)
                 offset += chunk
+
+    def fput_object(self, lpath, dpath, display_progress=False):
+        '''
+        Upload file in lpath into remote path dpath.
+        '''
+        # TODO: progressbar
+        # (minio api is inconsistent here - allows a 'progress thread' 
+        #  for whole-file u/l but no per-chunk u/l vs 
+        #  chunked dl and no- 'progress thread' d/l)
+
+        log.debug('fput_object: {} {}'.format(lpath, dpath))
+        self.client.fput_object(self.bucket, lpath, dpath)
 
 
 client = DJArchiveClient.client  # export factory method as utility function

@@ -64,6 +64,26 @@ def logsetup(*args):
     logging.getLogger('djarchive_client').setLevel(level)
 
 
+def manifest(*args):
+    if len(args) != 1:
+        raise TypeError('manifest source_directory')
+
+    client().write_manifest(*args, overwrite=True)
+
+
+def upload(*args):
+    if len(args) != 3:
+        raise TypeError('name revision source_directory')
+
+    try:
+        c = client(admin=True)
+    except AttributeError:
+        print('admin operation requested without credentials')
+        return
+
+    c.upload(*args)
+
+
 def datasets(*args):
     print('dataset_name')
     for d in client().datasets():
@@ -95,6 +115,21 @@ def shell(*args):
 
 
 actions = {
+    'manifest': (manifest,
+                 '''
+                 manifest source_directory:
+
+                 create a manifest for the dataset inside source_directory.
+                 '''),
+    'upload':   (upload,
+                 '''
+                 upload name revision source_directory:
+
+                 upload dataset the dataset of name / revision contained
+                 within source_directory.
+
+                 expects a valid manifest to already exist in source_directory.
+                 '''),
     'datasets': (datasets,
                  '''
                  datasets:
