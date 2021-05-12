@@ -70,8 +70,6 @@ class DJArchiveClient(object):
                        for k in ('endpoint', 'access_key', 'secret_key',
                                  'bucket')}
 
-        print('ca', create_args)
-
         if admin and not all(('access_key' in create_args,
                               'secret_key' in create_args)):
 
@@ -299,15 +297,37 @@ class DJArchiveClient(object):
         will be created, otherwise, an error is signaled.
         '''
 
+        # ensure target directory exists before proceeding
         os.makedirs(target_directory, exist_ok=True) if create_target else None
 
         if not os.path.exists(target_directory):
-
             msg = 'target_directory {} does not exist'.format(target_directory)
             log.warning(msg)
             raise FileNotFoundError(msg)
 
         pfx = ufs.join(dataset_name, revision)
+
+        # check/fetch dataset manifest
+
+        msg = 'fetching & loading dataset manifest'
+
+        log.debug(msg)
+        if display_progress:
+            print(msg)
+
+        ssubp = ufs.join(pfx, self.MANIFEST_FNAME)
+        lpath = os.path.join(target_directory, self.MANIFEST_FNAME)
+        lsubd, _ = os.path.split(lpath)
+
+        if not self.client.stat_object(self.bucket, ssubp):
+            msg = 'dataset {} revision {} manifest not found'.format(
+                dataset_name, revision)
+            log.debug(msg)
+            raise FileNotFoundError(msg)
+
+        self.fget_object(ssubp, lpath, display_progress=display_progress)
+
+        mani = self.read_manifest(lsubd)
 
         # main download loop -
         #
@@ -333,6 +353,10 @@ class DJArchiveClient(object):
             ssubp = spath.replace(  # <...?>/thing
                 ufs.commonprefix((pfx, spath)), '').lstrip('/')
 
+            if ssubp == self.MANIFEST_FNAME:
+                log.debug('skipping redundant manifest download')
+                continue
+
             # target_directory/<...?>/thing
             lpath = os.path.join(target_directory, *ssubp.split(ufs.sep))
             lsubd, _ = os.path.split(lpath)
@@ -341,6 +365,7 @@ class DJArchiveClient(object):
             assert (os.path.commonprefix((target_directory, lpath))
                     == target_directory)
 
+            # transfer file
             xfer_msg = 'transferring {} to {}'.format(spath, lpath)
 
             log.debug(xfer_msg)
@@ -352,6 +377,21 @@ class DJArchiveClient(object):
 
             self.fget_object(spath, lpath, display_progress=display_progress)
 
+            # check file integrity
+            cksum_msg = 'verifying integrity of {}'.format(spath)
+
+            log.debug(cksum_msg)
+
+            if display_progress:
+                print(cksum_msg)
+
+            lsz, lsha = self._manifest(lpath)
+
+            # TODO: better handling of mismatch (e.g. nretries, etc)
+            assert all((lsz == mani[ssubp]['size'],
+                        lsha == mani[ssubp]['sha']))
+
+            # and mark as complete
             nfound += 1
 
         if not nfound:
