@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 class DJArchiveClient(object):
 
     MANIFEST_FNAME = 'djarchive-manifest.csv'
-    
+
     def __init__(self, **kwargs):
         '''
         Create a DJArchiveClient.
@@ -88,7 +88,7 @@ class DJArchiveClient(object):
         '''
 
         fp_sz = os.stat(filepath).st_size
-        
+
         fp_sha = sha()
 
         rd_sz = 1024 * 64
@@ -102,6 +102,10 @@ class DJArchiveClient(object):
         return fp_sz, fp_sha.hexdigest()
 
     def _normalize_path(self, root_directory, filepath):
+        '''
+        normlize path from host-local format into storage-side format
+        (s3/posixpath)
+        '''
 
         subp = filepath.replace(
             os.path.commonprefix(
@@ -110,8 +114,12 @@ class DJArchiveClient(object):
         return subp.replace(os.path.sep, ufs.sep)
 
     def _denormalize_path(self, root_directory, subpath):
+        '''
+        denormlize path from storage-side format into host-local format
+        (os.path)
+        '''
 
-        subpath = subp.replace(ufs.sep, os.path.sep)
+        subpath = subpath.replace(ufs.sep, os.path.sep)
 
         return os.path.join(root_directory, subpath)
 
@@ -120,7 +128,7 @@ class DJArchiveClient(object):
         create a manifest for source_directory.
 
         manifest is of the form:
-        
+
           size(bytes),hex(sha256),posixpath(subpath)
           ...
 
@@ -141,7 +149,7 @@ class DJArchiveClient(object):
 
                     if fp == mani:
                         continue
-                    
+
                     subp = self._normalize_path(source_directory, fp)
 
                     print("adding {}".format(subp))
@@ -232,7 +240,8 @@ class DJArchiveClient(object):
 
                 self.fput_object(fp, dstp)
 
-        self.fput_object(mani_fp, ufs.join(name, revision, self.MANIFEST_FNAME))
+        self.fput_object(mani_fp, ufs.join(
+            name, revision, self.MANIFEST_FNAME))
 
     def redact(name, revision):
         '''
@@ -436,8 +445,8 @@ class DJArchiveClient(object):
         Upload file in lpath into remote path dpath.
         '''
         # TODO: progressbar
-        # (minio api is inconsistent here - allows a 'progress thread' 
-        #  for whole-file u/l but no per-chunk u/l vs 
+        # (minio api is inconsistent here - allows a 'progress thread'
+        #  for whole-file u/l but no per-chunk u/l vs
         #  chunked dl and no- 'progress thread' d/l)
 
         log.debug('fput_object: {} {}'.format(lpath, dpath))
