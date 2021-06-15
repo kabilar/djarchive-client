@@ -17,7 +17,38 @@ from tqdm import tqdm
 log = logging.getLogger(__name__)
 
 
+class LoggingContext:
+    '''
+    Conditional logging context manager via:
+    https://docs.python.org/3/howto/logging-cookbook.html
+    '''
+    def __init__(self, logger, level=None, handler=None, close=True):
+        self.logger = logger
+        self.level = level
+        self.handler = handler
+        self.close = close
+
+    def __enter__(self):
+        if self.level is not None:
+            self.old_level = self.logger.level
+            self.logger.setLevel(self.level)
+        if self.handler:
+            self.logger.addHandler(self.handler)
+
+    def __exit__(self, et, ev, tb):
+        if self.level is not None:
+            self.logger.setLevel(self.old_level)
+        if self.handler:
+            self.logger.removeHandler(self.handler)
+        if self.handler and self.close:
+            self.handler.close()
+        # implicit return of None => don't swallow exceptions
+
+
 class DJArchiveClient(object):
+    '''
+    Archive Client class - manages operations to s3/djarchive
+    '''
 
     MANIFEST_FNAME = 'djarchive-manifest.csv'
 
@@ -26,6 +57,7 @@ class DJArchiveClient(object):
         Create a DJArchiveClient.
         Normal client code should use the 'client' method.
         '''
+        log.debug('kwargs: {}'.format(dict(kwargs, secret_key='*REDACTED*')))
 
         self.bucket = kwargs['bucket']
         self.endpoint = kwargs['endpoint']
@@ -57,6 +89,7 @@ class DJArchiveClient(object):
         more general purpose client usage without requiring extra
         configuration.
         '''
+        log.debug('admin: {}'.format(admin))
 
         dj_custom = cfg.get('custom', {})
 
@@ -86,7 +119,6 @@ class DJArchiveClient(object):
         Does not perform path normalization to/from posix path as used within
         the manifest file.
         '''
-
         fp_sz = os.stat(filepath).st_size
 
         fp_sha = sha()
@@ -133,6 +165,11 @@ class DJArchiveClient(object):
           ...
 
         '''
+        log.debug('source_directory: {}, overwrite: {}'.format(
+            source_directory, overwrite))
+
+        # XXX: some logic duplicated in _upload_creating_manifest -
+        #      adjustments here should be audited for impact there as well.
 
         mani = os.path.join(source_directory, self.MANIFEST_FNAME)
 
@@ -174,6 +211,7 @@ class DJArchiveClient(object):
 
         If no manifest exists, a FileNotFoundError is raised.
         '''
+        log.debug('source_directory: {}'.format(source_directory))
 
         mani = os.path.join(source_directory, self.MANIFEST_FNAME)
 
@@ -197,22 +235,37 @@ class DJArchiveClient(object):
         (currently placeholder for API design)
         '''
 
-        # todo: make more intuitive api?
+        log.debug('name: {}, revision: {}, source_directory: {}'.format(
+            name, revision, source_directory))
+
         mani_fp = os.path.join(source_directory, self.MANIFEST_FNAME)
 
-        try:
-            mani_dat = self.read_manifest(source_directory)
-        except FileNotFoundError:
-            raise FileNotFoundError(
-                "Manifest not found for {}. Run 'manifest' first?".format(
-                    source_directory)) from None
+        if os.path.exists(mani_fp):
+            self._upload_using_manifest(name, revision, source_directory)
+        else:
+            self._upload_creating_manifest(name, revision, source_directory)
+
+    def _upload_using_manifest(self, name, revision, source_directory):
+        '''
+        Upload dataset which already has a manifest -
+        Expects source directory to match manifest contents;
+
+        Raises FileNotFoundError if files are found in
+        source_directory not in the manifest, and ValueError if files
+        are found with manifest size/checksum mismatch.
+        '''
+        log.debug('name: {}, revision: {}, source_directory: {}'.format(
+            name, revision, source_directory))
+
+        mani_fp = os.path.join(source_directory, self.MANIFEST_FNAME)
+
+        mani_dat = self.read_manifest(source_directory)
 
         for root, dirs, files in os.walk(source_directory):
 
             for fp in (os.path.join(root, f) for f in files):
 
-                if fp == mani_fp:
-                    log.warning('fixme: upload mani')
+                if fp == mani_fp:  # defer manifest upload until end
                     continue
 
                 subp = self._normalize_path(source_directory, fp)
@@ -238,10 +291,51 @@ class DJArchiveClient(object):
 
                 dstp = ufs.join(name, revision, subp)
 
-                self.fput_object(fp, dstp)
+                self.fput_object(dstp, fp)
 
-        self.fput_object(mani_fp, ufs.join(
-            name, revision, self.MANIFEST_FNAME))
+        # upload of files complete - send manifest to indicate completeness.
+        self.fput_object(ufs.join(name, revision, self.MANIFEST_FNAME),
+                         mani_fp)
+
+    def _upload_creating_manifest(self, name, revision, source_directory):
+        '''
+        Upload dataset without manifest -
+        Manifest will be generated as part of the upload process.
+        '''
+        log.debug('name: {}, revision: {}, source_directory: {}'.format(
+            name, revision, source_directory))
+
+        # XXX: some logic duplicated from write_manifest -
+        #      adjustments here should be audited for impact there as well.
+
+        mani_fp = os.path.join(source_directory, self.MANIFEST_FNAME)
+
+        assert not os.path.exists(mani_fp)
+
+        with open(mani_fp, 'wb') as mani_fh:
+
+            for root, dirs, files in os.walk(source_directory):
+
+                for fp in (os.path.join(root, f) for f in files):
+
+                    if fp == mani_fp:  # defer manifest upload until end
+                        continue
+
+                    fp_sz, fp_sha = self._manifest(fp)
+
+                    subp = self._normalize_path(source_directory, fp)
+
+                    dstp = ufs.join(name, revision, subp)
+
+                    self.fput_object(dstp, fp)
+
+                    ent = '"{}","{}","{}"\n'.format(fp_sz, fp_sha, subp)
+
+                    mani_fh.write(ent.encode())
+
+        # upload of files complete - send manifest to indicate completeness.
+        self.fput_object(ufs.join(name, revision, self.MANIFEST_FNAME),
+                         mani_fp)
 
     def redact(name, revision):
         '''
@@ -298,119 +392,136 @@ class DJArchiveClient(object):
 
     def download(self, dataset_name, revision, target_directory,
                  create_target=False, display_progress=False):
-
         '''
         download a dataset's contents into the top-level of target_directory.
 
         when create_target is specified, target_directory and parents
         will be created, otherwise, an error is signaled.
+
+        Note: display_progress currently means 'enable debug level logging'
+              within function scope - if details are not displayed,
+              ensure loggingConfig settings are correct in client code.
+
+              (verified OK for default djarchive CLI script)
         '''
 
-        # ensure target directory exists before proceeding
-        os.makedirs(target_directory, exist_ok=True) if create_target else None
+        log.debug(('dataset_name: {}, revision: {}, target_directory: {},'
+                   'create_target: {}, display_progress: {}').format(
+                       dataset_name, revision, target_directory,
+                       create_target, display_progress))
 
-        if not os.path.exists(target_directory):
-            msg = 'target_directory {} does not exist'.format(target_directory)
-            log.warning(msg)
-            raise FileNotFoundError(msg)
+        with LoggingContext(log, level=logging.DEBUG if display_progress
+                            else logging.INFO):
 
-        pfx = ufs.join(dataset_name, revision)
+            if create_target:  # ensure target directory exists
+                os.makedirs(target_directory, exist_ok=True)
 
-        # check/fetch dataset manifest
+            if not os.path.exists(target_directory):
+                msg = 'target_directory {} does not exist'.format(
+                    target_directory)
+                log.warning(msg)
+                raise FileNotFoundError(msg)
 
-        msg = 'fetching & loading dataset manifest'
+            pfx = ufs.join(dataset_name, revision)
 
-        log.debug(msg)
-        if display_progress:
-            print(msg)
+            # check/fetch dataset manifest
+            log.debug('fetching & loading dataset manifest')
 
-        ssubp = ufs.join(pfx, self.MANIFEST_FNAME)
-        lpath = os.path.join(target_directory, self.MANIFEST_FNAME)
-        lsubd, _ = os.path.split(lpath)
-
-        if not self.client.stat_object(self.bucket, ssubp):
-            msg = 'dataset {} revision {} manifest not found'.format(
-                dataset_name, revision)
-            log.debug(msg)
-            raise FileNotFoundError(msg)
-
-        self.fget_object(ssubp, lpath, display_progress=display_progress)
-
-        mani = self.read_manifest(lsubd)
-
-        # main download loop -
-        #
-        # iterate over objects,
-        # convert full source path to source subpath,
-        # construct local path and create local subdirectory in the target
-        # then fetch the object into the local path.
-        #
-        # local paths are dealt with using OS path for native support,
-        # paths in the s3 space use posixpath since these are '/' delimited
-
-        nfound = 0
-
-        obj_iter = self.client.list_objects(
-            self.bucket, recursive=True, prefix=pfx)
-
-        for obj in obj_iter:
-
-            assert not obj.is_dir  # assuming dir not in recursive=True list
-
-            spath = obj.object_name  # ds/rev/<...?>/thing
-
-            ssubp = spath.replace(  # <...?>/thing
-                ufs.commonprefix((pfx, spath)), '').lstrip('/')
-
-            if ssubp == self.MANIFEST_FNAME:
-                log.debug('skipping redundant manifest download')
-                continue
-
-            # target_directory/<...?>/thing
-            lpath = os.path.join(target_directory, *ssubp.split(ufs.sep))
+            ssubp = ufs.join(pfx, self.MANIFEST_FNAME)
+            lpath = os.path.join(target_directory, self.MANIFEST_FNAME)
             lsubd, _ = os.path.split(lpath)
 
-            # ensure we are not creating outside of target_directory
-            assert (os.path.commonprefix((target_directory, lpath))
-                    == target_directory)
+            if not self.client.stat_object(self.bucket, ssubp):
+                msg = 'dataset {} revision {} manifest not found'.format(
+                    dataset_name, revision)
+                log.debug(msg)
+                raise FileNotFoundError(msg)
 
-            # transfer file
-            xfer_msg = 'transferring {} to {}'.format(spath, lpath)
+            self.fget_object(ssubp, lpath, display_progress=display_progress)
 
-            log.debug(xfer_msg)
+            mani = self.read_manifest(lsubd)
 
-            if display_progress:
-                print(xfer_msg)
+            # main download loop -
+            #
+            # iterate over objects,
+            # convert full source path to source subpath,
+            # construct local path and create local subdirectory in the target
+            # then fetch the object into the local path.
+            #
+            # local paths are dealt with using OS path for native support,
+            # paths in the s3 space use posixpath since these are '/' delimited
 
-            os.makedirs(lsubd, exist_ok=True)
+            nfound, nerr = 0, 0
 
-            self.fget_object(spath, lpath, display_progress=display_progress)
+            obj_iter = self.client.list_objects(
+                self.bucket, recursive=True, prefix=pfx)
 
-            # check file integrity
-            cksum_msg = 'verifying integrity of {}'.format(spath)
+            for obj in obj_iter:
 
-            log.debug(cksum_msg)
+                assert not obj.is_dir  # dirs not in recursive=True output
 
-            if display_progress:
-                print(cksum_msg)
+                spath = obj.object_name  # ds/rev/<...?>/thing
 
-            lsz, lsha = self._manifest(lpath)
+                ssubp = spath.replace(  # <...?>/thing
+                    ufs.commonprefix((pfx, spath)), '').lstrip('/')
 
-            # TODO: better handling of mismatch (e.g. nretries, etc)
-            assert all((lsz == mani[ssubp]['size'],
-                        lsha == mani[ssubp]['sha']))
+                if ssubp == self.MANIFEST_FNAME:
+                    continue  # skip manifest re-download
 
-            # and mark as complete
-            nfound += 1
+                # target_directory/<...?>/thing
+                lpath = os.path.join(target_directory, *ssubp.split(ufs.sep))
+                lsubd, _ = os.path.split(lpath)
 
-        if not nfound:
+                # ensure we are not creating outside of target_directory
+                assert (os.path.commonprefix((target_directory, lpath))
+                        == target_directory)
 
-            msg = 'dataset {} revision {} not found'.format(
-                dataset_name, revision)
+                # actual download/verification -
+                #
+                # if the file exists, checksum and skip, falling back to
+                #    refetch on checksum/size mismatch.
+                #
+                # if the file does not exist, download and checksum.
 
-            log.debug(msg)
+                if os.path.exists(lpath):
 
-            raise FileNotFoundError(msg)
+                    log.debug('{} exists. verifying integrity.'.format(lpath))
+                    lsz, lsha = self._manifest(lpath)
+
+                    if all((lsz == mani[ssubp]['size'],
+                            lsha == mani[ssubp]['sha'])):
+
+                        log.debug('integrity check ok. skipping download.')
+
+                        continue  # for obj in obj_iter
+
+                    nerr += 1
+                    log.warning('integrity issue. redownloading {}'.format(
+                        spath))
+
+                # transfer file
+                log.debug('transferring {} to {}'.format(spath, lpath))
+
+                os.makedirs(lsubd, exist_ok=True)
+
+                self.fget_object(spath, lpath, display_progress)
+
+                # check file integrity
+                log.debug('verifying integrity of {}'.format(lpath))
+
+                lsz, lsha = self._manifest(lpath)
+
+                if not all((lsz == mani[ssubp]['size'],
+                            lsha == mani[ssubp]['sha'])):
+
+                    nerr += 1
+
+                    log.warning('integrity issue fetching {}'.format(spath))
+
+                # and mark as complete
+                nfound += 1
+
+            log.info('transfer complete with {} issues.'.format(nerr))
 
     def fget_object(self, spath, lpath, display_progress=False):
         '''
@@ -418,6 +529,9 @@ class DJArchiveClient(object):
 
         If display_progress=True, a download progress meter will be displayed.
         '''
+
+        log.debug('spath: {}, lpath: {}, display_progress: {}'.format(
+            spath, lpath, display_progress))
 
         statb = self.client.stat_object(self.bucket, spath)
 
@@ -440,17 +554,17 @@ class DJArchiveClient(object):
                 fh.write(dat.data)
                 offset += chunk
 
-    def fput_object(self, lpath, dpath, display_progress=False):
+    def fput_object(self, dpath, lpath, display_progress=False):
         '''
-        Upload file in lpath into remote path dpath.
+        Upload file to remote path dpath from lpath.
         '''
         # TODO: progressbar
         # (minio api is inconsistent here - allows a 'progress thread'
         #  for whole-file u/l but no per-chunk u/l vs
         #  chunked dl and no- 'progress thread' d/l)
 
-        log.debug('fput_object: {} {}'.format(lpath, dpath))
-        self.client.fput_object(self.bucket, lpath, dpath)
+        log.debug('dpath: {}, lpath: {}'.format(lpath, dpath))
+        self.client.fput_object(self.bucket, dpath, lpath)
 
 
 client = DJArchiveClient.client  # export factory method as utility function

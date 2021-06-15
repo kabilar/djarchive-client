@@ -32,22 +32,75 @@ Installation & Setup instructions are as follows:
         - djarchive.bucket
         - djarchive.endpoint
 
+      This should only be needed for development or custom server
+      configurations.
+
 Usage via 'djarchive' utility script
 ====================================
 
 The 'djarchive' utility script can be used for CLI interactions with the
-data archive. Usage synopsys is as follows:
+data archive. Usage synopsys is described in the following subsections.
+
+Browsing & Retrieving Datasets
+------------------------------
+
+The following example shows a minimal usage synopsis to navigate the available
+datasets and to download a single dataset.
 
 .. code-block:: sh
 
-  $ djarchive datasets
+  $ djarchive datasets # list datasets
   some-set
-  $ djarchive revisions
+  $ djarchive revisions # list all datasets & revisions
   some-set,000
   other-set,001
-  $ djarchive revisions some-set
+  $ djarchive revisions some-set # list revisions for dataset 'some-set'
   some-set,000
-  $ djarchive download some-set 000 ./some-set-000
+  $ djarchive download some-set 000 ./some-set-000 # download some-set rev. 000
+
+File Integrity, Download Caching & Error Handling
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The djarchive client provides integrity protection in the form of a
+file manifest, called 'djarchive-manifest.csv', which is a CSV list
+of file sizes, sha1 hashes, and file subpaths for a given dataset.
+
+Retrieval of datasets begins with the download of this manifest, which
+is then used to direct the remaining download and to verify download
+actions complete successfullly.
+
+To allow for resuming of partially downloaded datasets, local files in the
+target directory of the download are compared against the manifest. If a
+local file matches the manifest contents, it is not re-retrieved, and if
+a local file does not match the manifest contents, it is re-retrieved
+without confirmation.
+
+Uploading Datasets
+------------------
+
+Datasets can be uploaded using the djarchive client using the 'upload'
+functionality. In short:
+
+.. code-block:: sh
+
+  $ djarchive upload my-dataset 1 /path/to/my-dataset
+
+If a djarchive manifest is not present in /path/to/my-dataset, it will
+be generated as part of the upload process, with the manifest uploaded
+as the last step to indicate that the dataset is complete.
+
+If a djarchive manifest is present in /path/to/my-dataset, files will be
+checked against the manifest as part of the upload process, and an error
+will be signalled if files exist in the dataset folder which are not
+tracked in the manifest, or if files do not match the expected manifest
+values.
+
+The djarchive manifest file can also be generated as a separate step via
+the 'manifest' command:
+
+.. code-block:: sh
+
+  $ djarchive manifest /path/to/my-dataset
 
 Usage via 'djarchive_client' python pacakge
 ===========================================
