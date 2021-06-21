@@ -458,12 +458,14 @@ class DJArchiveClient(object):
             # local paths are dealt with using OS path for native support,
             # paths in the s3 space use posixpath since these are '/' delimited
 
-            nfound, nerr = 0, 0
+            nfound, nerr, oerr = 0, 0, 0  # n files, global & per-object errors
 
             obj_iter = self.client.list_objects(
                 self.bucket, recursive=True, prefix=pfx)
 
             for obj in obj_iter:
+
+                oerr = 0
 
                 assert not obj.is_dir  # dirs not in recursive=True output
 
@@ -500,9 +502,10 @@ class DJArchiveClient(object):
 
                         log.debug('integrity check ok. skipping download.')
 
-                        continue  # for obj in obj_iter
+                        nfound += 1  # mark as complete
+                        continue  # goto for obj in obj_iter
 
-                    nerr += 1
+                    oerr += 1
                     log.warning('integrity issue. redownloading {}'.format(
                         spath))
 
@@ -521,14 +524,17 @@ class DJArchiveClient(object):
                 if not all((lsz == mani[ssubp]['size'],
                             lsha == mani[ssubp]['sha'])):
 
-                    nerr += 1
+                    oerr += 1
 
                     log.warning('integrity issue fetching {}'.format(spath))
 
                 # and mark as complete
+                nerr += 1 if oerr else 0
                 nfound += 1
 
             log.info('transfer complete with {} issues.'.format(nerr))
+
+            return nfound, nerr
 
     def fget_object(self, spath, lpath, display_progress=False):
         '''
