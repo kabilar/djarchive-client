@@ -228,7 +228,7 @@ class DJArchiveClient(object):
 
         return ret
 
-    def upload(self, name, revision, source_directory):
+    def upload(self, name, revision, source_directory, display_progress=False):
         '''
         upload contents of source_directory as the dataset of name/revision
 
@@ -238,14 +238,20 @@ class DJArchiveClient(object):
         log.debug('name: {}, revision: {}, source_directory: {}'.format(
             name, revision, source_directory))
 
-        mani_fp = os.path.join(source_directory, self.MANIFEST_FNAME)
+        with LoggingContext(log, level=logging.DEBUG if display_progress
+                            else logging.INFO):
 
-        if os.path.exists(mani_fp):
-            self._upload_using_manifest(name, revision, source_directory)
-        else:
-            self._upload_creating_manifest(name, revision, source_directory)
+            mani_fp = os.path.join(source_directory, self.MANIFEST_FNAME)
 
-    def _upload_using_manifest(self, name, revision, source_directory):
+            if os.path.exists(mani_fp):
+                self._upload_using_manifest(
+                    name, revision, source_directory, display_progress)
+            else:
+                self._upload_creating_manifest(
+                    name, revision, source_directory, display_progress)
+
+    def _upload_using_manifest(self, name, revision, source_directory,
+                               display_progress):
         '''
         Upload dataset which already has a manifest -
         Expects source directory to match manifest contents;
@@ -295,9 +301,10 @@ class DJArchiveClient(object):
 
         # upload of files complete - send manifest to indicate completeness.
         self.fput_object(ufs.join(name, revision, self.MANIFEST_FNAME),
-                         mani_fp)
+                         mani_fp, display_progress)
 
-    def _upload_creating_manifest(self, name, revision, source_directory):
+    def _upload_creating_manifest(self, name, revision, source_directory,
+                                  display_progress):
         '''
         Upload dataset without manifest -
         Manifest will be generated as part of the upload process.
@@ -335,7 +342,7 @@ class DJArchiveClient(object):
 
         # upload of files complete - send manifest to indicate completeness.
         self.fput_object(ufs.join(name, revision, self.MANIFEST_FNAME),
-                         mani_fp)
+                         mani_fp, display_progress)
 
     def redact(name, revision):
         '''
@@ -529,10 +536,6 @@ class DJArchiveClient(object):
 
         If display_progress=True, a download progress meter will be displayed.
         '''
-
-        log.debug('spath: {}, lpath: {}, display_progress: {}'.format(
-            spath, lpath, display_progress))
-
         statb = self.client.stat_object(self.bucket, spath)
 
         chunksz = 1024 ** 2  # 1 MiB (TODO? configurable/tuning?)

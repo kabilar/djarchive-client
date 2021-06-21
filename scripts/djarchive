@@ -81,7 +81,7 @@ def upload(*args):
         print('admin operation requested without credentials')
         return
 
-    c.upload(*args)
+    c.upload(*args, display_progress=True)
 
 
 def datasets(*args):
