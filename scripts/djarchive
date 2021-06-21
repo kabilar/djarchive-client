@@ -100,11 +100,35 @@ def revisions(*args):
 
 
 def download(*args):
+
     if len(args) != 3:
         raise TypeError('download dataset revision target_directory')
 
+    retries = 3
+
     try:
-        client().download(*args, create_target=True, display_progress=True)
+
+        while retries > 0:
+
+            log.info('download attempt {}/3'.format(4 - retries))
+
+            nfound, nerr = client().download(
+                *args, create_target=True, display_progress=True)
+
+            if not nerr:
+                break
+
+            log.info('download had {} issues.'.format(nerr))
+
+            retries -= 1
+
+        if nerr:
+            log.warning(('download had {} issues after 3 retries. '
+                         'check logs for configuration issues '
+                         '& contact support if issues persist').format(nerr))
+        else:
+            log.info('download complete with 0 issues')
+
     except FileNotFoundError:
         print('dataset {} revision {} not found.'.format(*args[:2]),
               file=sys.stderr)
