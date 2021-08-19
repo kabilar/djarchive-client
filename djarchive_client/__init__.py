@@ -285,7 +285,7 @@ class DJArchiveClient(object):
 
                 ref_sz, ref_sha = mani_dat[subp]['size'], mani_dat[subp]['sha']
 
-                if not all((fp_sz == ref_sz, fp_sha == ref_sha)):
+                if fp_sz != ref_sz or fp_sha != ref_sha:
 
                     msg = 'manifest mismatch for {}'.format(subp)
                     msg += ' (sz: {} / ref: {})'.format(fp_sz, ref_sz)
@@ -369,6 +369,9 @@ class DJArchiveClient(object):
         '''
         return the list of available dataset revisions as a generator
         of (dataset_name, dataset_revision) tuples.
+
+        when datasest is provided, only return the revisions for that
+        dataset.
         '''
         def _revisions(dataset):
 
@@ -382,16 +385,16 @@ class DJArchiveClient(object):
 
                 yield tuple(ds.object_name.rstrip('/').split(ufs.sep))
 
-        nfound = 0
+        found = False
 
         datasets = (dataset,) if dataset else self.datasets()
 
         for ds in datasets:
-            for i, r in enumerate(_revisions(ds), start=1):
-                nfound = i
+            for r in _revisions(ds):
+                found = True
                 yield r
 
-        if dataset and not nfound:
+        if dataset and not found:
 
             msg = 'dataset {} not found'.format(dataset)
             log.debug(msg)
@@ -521,8 +524,7 @@ class DJArchiveClient(object):
 
                 lsz, lsha = self._manifest(lpath)
 
-                if not all((lsz == mani[ssubp]['size'],
-                            lsha == mani[ssubp]['sha'])):
+                if lsz != mani[ssubp]['size'] or lsha != mani[ssubp]['sha']:
 
                     oerr += 1
 
