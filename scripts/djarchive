@@ -54,7 +54,7 @@ def logsetup(*args):
         handlers = [logging.StreamHandler()]
 
     datefmt = '%Y-%m-%d %H:%M:%S'
-    msgfmt = '%(asctime)s:%(levelname)s:%(module)s:%(funcName)s:%(message)s'
+    msgfmt = '%(asctime)s:%(funcName)s:%(message)s'
 
     logging.basicConfig(format=msgfmt, datefmt=datefmt, level=logging.ERROR,
                         handlers=handlers)
@@ -62,6 +62,26 @@ def logsetup(*args):
     log.setLevel(level)
 
     logging.getLogger('djarchive_client').setLevel(level)
+
+
+def manifest(*args):
+    if len(args) != 1:
+        raise TypeError('manifest source_directory')
+
+    client().write_manifest(*args, overwrite=True)
+
+
+def upload(*args):
+    if len(args) != 3:
+        raise TypeError('name revision source_directory')
+
+    try:
+        c = client(admin=True)
+    except AttributeError:
+        print('admin operation requested without credentials')
+        return
+
+    c.upload(*args, display_progress=True)
 
 
 def datasets(*args):
@@ -80,11 +100,35 @@ def revisions(*args):
 
 
 def download(*args):
+
     if len(args) != 3:
         raise TypeError('download dataset revision target_directory')
 
+    retries = 3
+
     try:
-        client().download(*args, create_target=True, display_progress=True)
+
+        while retries > 0:
+
+            log.info('download attempt {}/3'.format(4 - retries))
+
+            nfound, nerr = client().download(
+                *args, create_target=True, display_progress=True)
+
+            if not nerr:
+                break
+
+            log.info('download had {} issues.'.format(nerr))
+
+            retries -= 1
+
+        if nerr:
+            log.warning(('download had {} issues after 3 retries. '
+                         'check logs for configuration issues '
+                         '& contact support if issues persist').format(nerr))
+        else:
+            log.info('download complete with 0 issues')
+
     except FileNotFoundError:
         print('dataset {} revision {} not found.'.format(*args[:2]),
               file=sys.stderr)
@@ -95,6 +139,21 @@ def shell(*args):
 
 
 actions = {
+    'manifest': (manifest,
+                 '''
+                 manifest source_directory:
+
+                 create a manifest for the dataset inside source_directory.
+                 '''),
+    'upload':   (upload,
+                 '''
+                 upload name revision source_directory:
+
+                 upload dataset the dataset of name / revision contained
+                 within source_directory.
+
+                 expects a valid manifest to already exist in source_directory.
+                 '''),
     'datasets': (datasets,
                  '''
                  datasets:
