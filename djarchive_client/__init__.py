@@ -110,13 +110,14 @@ class DJArchiveClient(object):
 
                 yield tuple(ds.object_name.rstrip('/').split(ufs.sep))
 
-        nfound = -1
+        nfound = 0
 
         datasets = (dataset,) if dataset else self.datasets()
 
         for ds in datasets:
-            nfound += 1
-            yield from _revisions(ds)
+            for i, r in enumerate(_revisions(ds), start=1):
+                nfound = i
+                yield r
 
         if dataset and not nfound:
 
