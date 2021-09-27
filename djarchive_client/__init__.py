@@ -51,7 +51,7 @@ class DJArchiveClient(object):
     Archive Client class - manages operations to s3/djarchive
     '''
 
-    FILENAME_FILTER = r'\.*'
+    FILENAME_FILTER = r'^\.'
     MANIFEST_FNAME = 'djarchive-manifest.csv'
 
     def __init__(self, **kwargs):
@@ -100,13 +100,14 @@ class DJArchiveClient(object):
 
         cfg_defaults = {
             'djarchive.bucket': 'djhub.vathes.datapub.elements',
-            'djarchive.endpoint': 's3.djhub.io'
+            'djarchive.endpoint': 's3.djhub.io',
+            'djarchive.filename_filter': DJArchiveClient.FILENAME_FILTER
         }
 
         create_args = {k: {**cfg_defaults, **dj_custom}.get(
             'djarchive.{}'.format(k), None)
                        for k in ('endpoint', 'access_key', 'secret_key',
-                                 'bucket')}
+                                 'bucket', 'filename_filter')}
 
         if admin and not all(('access_key' in create_args,
                               'secret_key' in create_args)):
@@ -115,19 +116,22 @@ class DJArchiveClient(object):
 
         return cls(**create_args)
 
-    def walk(self, top):
+    def _filter_path(self, fp):
         '''
-        Filtered os.walk()
-        (using DJArchiveClient.FILENAME_FILTER or client(..., filename_filter))
+        filter normalized paths according to self.filename_filter
+
+        Returns fp if path passes filter, else None.
         '''
+        # XXX: didn't override os.walk; intermediate path filtering problematic
+        #  ex: /some/.foo/junk/file:
+        #
+        #    - 'dirs' doesn't impact iteration in DFS mode
+        #    - '/some/.foo/junk' doesn't match as a 'root'
 
-        skip_rx = re.compile(self.filename_filter)
+        rx = re.compile(self.filename_filter if self.filename_filter else '^$')
 
-        for root, dirs, files in os.walk(top):
-            if not skip_rx.match(os.path.split(root)[1]):
-                yield (root,
-                       (d for d in dirs if not skip_rx.match(d)),
-                       (f for f in files if not skip_rx.match(f)))
+        if not any([rx.match(i) for i in fp.split(ufs.sep)]):
+            return fp
 
     def _manifest(self, filepath):
         '''
@@ -199,7 +203,7 @@ class DJArchiveClient(object):
 
         with open(mani, 'wb') as mani_fh:
 
-            for root, dirs, files in self.walk(source_directory):
+            for root, dirs, files in os.walk(source_directory):
 
                 for fp in (os.path.join(root, f) for f in files):
 
@@ -207,6 +211,9 @@ class DJArchiveClient(object):
                         continue
 
                     subp = self._normalize_path(source_directory, fp)
+
+                    if not self._filter_path(subp):
+                        continue
 
                     print("adding {}".format(subp))
 
@@ -286,7 +293,7 @@ class DJArchiveClient(object):
 
         mani_dat = self.read_manifest(source_directory)
 
-        for root, dirs, files in self.walk(source_directory):
+        for root, dirs, files in os.walk(source_directory):
 
             for fp in (os.path.join(root, f) for f in files):
 
@@ -294,6 +301,10 @@ class DJArchiveClient(object):
                     continue
 
                 subp = self._normalize_path(source_directory, fp)
+
+                # XXX: assumes manifest generation occurs under same filter
+                if not self._filter_path(subp):
+                    continue
 
                 if subp not in mani_dat:
                     msg = 'subpath {} not in manifest'.format(subp)
@@ -340,16 +351,19 @@ class DJArchiveClient(object):
 
         with open(mani_fp, 'wb') as mani_fh:
 
-            for root, dirs, files in self.walk(source_directory):
+            for root, dirs, files in os.walk(source_directory):
 
                 for fp in (os.path.join(root, f) for f in files):
 
                     if fp == mani_fp:  # defer manifest upload until end
                         continue
 
-                    fp_sz, fp_sha = self._manifest(fp)
-
                     subp = self._normalize_path(source_directory, fp)
+
+                    if not self._filter_path(subp):
+                        continue
+
+                    fp_sz, fp_sha = self._manifest(fp)
 
                     dstp = ufs.join(name, revision, subp)
 
