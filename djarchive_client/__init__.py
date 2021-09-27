@@ -1,6 +1,7 @@
 
 import os
 import logging
+import re
 
 import posixpath as ufs
 
@@ -50,6 +51,7 @@ class DJArchiveClient(object):
     Archive Client class - manages operations to s3/djarchive
     '''
 
+    FILENAME_FILTER = r'\.*'
     MANIFEST_FNAME = 'djarchive-manifest.csv'
 
     def __init__(self, **kwargs):
@@ -63,6 +65,9 @@ class DJArchiveClient(object):
         self.endpoint = kwargs['endpoint']
         self.access_key = kwargs['access_key']
         self.secret_key = kwargs['secret_key']
+
+        self.filename_filter = kwargs.get('filename_filter',
+                                          DJArchiveClient.FILENAME_FILTER)
 
         self.client = Minio(self.endpoint, access_key=self.access_key,
                             secret_key=self.secret_key)
@@ -109,6 +114,20 @@ class DJArchiveClient(object):
             raise AttributeError('admin operation requested w/o credentials.')
 
         return cls(**create_args)
+
+    def walk(self, top):
+        '''
+        Filtered os.walk()
+        (using DJArchiveClient.FILENAME_FILTER or client(..., filename_filter))
+        '''
+
+        skip_rx = re.compile(self.filename_filter)
+
+        for root, dirs, files in os.walk(top):
+            if not skip_rx.match(os.path.split(root)[1]):
+                yield (root,
+                       (d for d in dirs if not skip_rx.match(d)),
+                       (f for f in files if not skip_rx.match(f)))
 
     def _manifest(self, filepath):
         '''
@@ -180,7 +199,7 @@ class DJArchiveClient(object):
 
         with open(mani, 'wb') as mani_fh:
 
-            for root, dirs, files in os.walk(source_directory):
+            for root, dirs, files in self.walk(source_directory):
 
                 for fp in (os.path.join(root, f) for f in files):
 
@@ -267,7 +286,7 @@ class DJArchiveClient(object):
 
         mani_dat = self.read_manifest(source_directory)
 
-        for root, dirs, files in os.walk(source_directory):
+        for root, dirs, files in self.walk(source_directory):
 
             for fp in (os.path.join(root, f) for f in files):
 
@@ -321,7 +340,7 @@ class DJArchiveClient(object):
 
         with open(mani_fp, 'wb') as mani_fh:
 
-            for root, dirs, files in os.walk(source_directory):
+            for root, dirs, files in self.walk(source_directory):
 
                 for fp in (os.path.join(root, f) for f in files):
 
