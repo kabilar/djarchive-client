@@ -65,6 +65,13 @@ The djarchive client provides integrity protection in the form of a
 file manifest, called 'djarchive-manifest.csv', which is a CSV list
 of file sizes, sha1 hashes, and file subpaths for a given dataset.
 
+By default, files having path components beginning with '.' are not
+considered for inclusion within archives. This behavior can be overridden
+by setting the dj.config.filename_filter property to a regular expression
+containing the desired filtering pattern, or the special string "''",
+which is treated as matching the empty string ('^$') and so should never
+match a file.
+
 Retrieval of datasets begins with the download of this manifest, which
 is then used to direct the remaining download and to verify download
 actions complete successfullly.
