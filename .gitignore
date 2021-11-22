@@ -3,3 +3,4 @@
 *.swp
 __pycache__
 dj_local_conf.json
+*.egg-info
