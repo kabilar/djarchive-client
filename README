@@ -131,6 +131,7 @@ example is as follows:
   >>> list(c.revisions('some-set'))
   [('some-set', '000')]
   >>> c.download('some-set', '000', './some-set-000', create_target=True)
+  >>> c.upload('some-other-set', '000', '/path/to/my/dataset')
 
 Logging & Output
 ================
